@@ -1,0 +1,212 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://finnhub.io/api/v1/quote",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.symbol }}"
+            },
+            {
+              "name": "token",
+              "value": "YOUR_FINNHUB_API_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        432,
+        -16
+      ],
+      "id": "a4a391e9-e90a-4291-9025-01e75773a5f1",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tickers = [\n  \"NVDA\", \"SPY\", \"BINANCE:BTCUSDT\",   // holdings\n  \"PLTR\", \"HOOD\", \"TSLA\", \"ASTS\",     // retail momentum\n  \"MU\", \"VRT\", \"CRDO\", \"CCJ\",         // AI infrastructure\n  \"AMZN\", \"TTD\"                        // mega-cap + fallen story\n];\n\nreturn tickers.map(t => ({ json: { symbol: t } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -16
+      ],
+      "id": "0fb40d01-5cb9-4c3c-b6d5-00001c9f9267",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map((item, i) => ({\n  json: {\n    symbol: $('Code in JavaScript').all()[i].json.symbol,\n    price: item.json.c,\n    dayChangePct: item.json.dp,\n    prevClose: item.json.pc,\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        -16
+      ],
+      "id": "1b211865-c0f6-49f8-be75-117af0db4601",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 17
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        32,
+        -16
+      ],
+      "id": "bf1f2b3b-693a-48ec-8e1b-844e614122da",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "YOUR_DISCORD_WEBHOOK_URL",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1280,
+        -16
+      ],
+      "id": "673860a6-ed14-4b54-95a4-b79dcf4809d5",
+      "name": "DISCORD"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = items.map(i => i.json);\n\nconst HOLDINGS = [\"NVDA\", \"SPY\", \"BINANCE:BTCUSDT\"];\n\nconst displayName = (s) => s === \"BINANCE:BTCUSDT\" ? \"BTC\" : s;\n\nconst fmt = (n) => n === null || n === undefined\n  ? \"n/a\"\n  : `${n >= 0 ? \"+\" : \"\"}${n.toFixed(2)}%`;\n\nconst line = (r) =>\n  `**${displayName(r.symbol)}**  $${r.price.toLocaleString()}  |  day: ${fmt(r.dayChangePct)}`;\n\n// Split into holdings vs watchlist\nconst holdings = rows.filter(r => HOLDINGS.includes(r.symbol));\nconst watching = rows.filter(r => !HOLDINGS.includes(r.symbol));\n\n// Sort watchlist by biggest absolute daily move (n/a sinks to bottom)\nwatching.sort((a, b) =>\n  Math.abs(b.dayChangePct ?? -Infinity) - Math.abs(a.dayChangePct ?? -Infinity)\n);\n\nconst today = new Date().toLocaleDateString(\"en-US\", { month: \"long\", day: \"numeric\" });\n\nconst message =\n  `📊 **Daily Portfolio Digest — ${today}**\\n\\n` +\n  `💼 **Holdings**\\n${holdings.map(line).join(\"\\n\")}\\n\\n` +\n  `👀 **Watching**\\n${watching.map(line).join(\"\\n\")}`;\n\nreturn [{ json: { content: message } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        -16
+      ],
+      "id": "799c86cc-c8ee-4dea-8b53-2f415ada8aae",
+      "name": "output"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\n\nconst DIR = '/Users/samallen/watchlist';\n\n// Helper: date string like 2026-07-07, offset by n days\nconst dateStr = (offset) => {\n  const d = new Date();\n  d.setDate(d.getDate() - offset);\n  return d.toISOString().slice(0, 10);\n};\n\n// Load a snapshot file for a given day-offset, or null\nconst loadSnapshot = (offset) => {\n  try {\n    const raw = fs.readFileSync(`${DIR}/snapshot-${dateStr(offset)}.json`, 'utf8');\n    const map = {};\n    for (const row of JSON.parse(raw)) map[row.symbol] = row.price;\n    return map;\n  } catch (e) {\n    return null;\n  }\n};\n\n// Yesterday's prices: try 1 day back, then 2, then 3 (weekends/missed runs)\nlet yesterday = null;\nfor (let o = 1; o <= 3 && !yesterday; o++) yesterday = loadSnapshot(o);\n\n// Last week's prices: try 7 days back, then widen 6–10\nlet lastWeek = loadSnapshot(7);\nfor (let o = 6; o <= 10 && !lastWeek; o++) lastWeek = loadSnapshot(o);\n\nconst pct = (now, prev) =>\n  prev ? Number((((now - prev) / prev) * 100).toFixed(2)) : null;\n\n// Build output\nconst out = items.map(item => ({\n  json: {\n    symbol: item.json.symbol,\n    price: item.json.price,\n    dayChangePct: yesterday\n      ? pct(item.json.price, yesterday[item.json.symbol])\n      : item.json.dayChangePct,   // fall back to Finnhub's day change\n    weeklyChangePct: lastWeek\n      ? pct(item.json.price, lastWeek[item.json.symbol])\n      : null,\n  }\n}));\n\n// Save today's snapshot for future runs\nconst todayRows = items.map(i => ({ symbol: i.json.symbol, price: i.json.price }));\nfs.writeFileSync(`${DIR}/snapshot-${dateStr(0)}.json`, JSON.stringify(todayRows));\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        -16
+      ],
+      "id": "5d30c5c2-200f-45e1-a7f6-24765ad08933",
+      "name": "compare"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "compare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DISCORD": {
+      "main": [
+        []
+      ]
+    },
+    "output": {
+      "main": [
+        [
+          {
+            "node": "DISCORD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "compare": {
+      "main": [
+        [
+          {
+            "node": "output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "91e86972-15db-4d81-9bc2-844cc5da4473",
+  "meta": {
+    "instanceId": "1915a4333a5dde4c068b780f5999d483b6e07a33fbfc89196e3a15add8cde645"
+  },
+  "id": "YeonYfhKxhRuWbNq",
+  "tags": []
+}
