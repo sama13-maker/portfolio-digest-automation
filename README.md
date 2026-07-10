@@ -4,7 +4,7 @@ A self-hosted automation that delivers two formatted Discord messages every day:
 
 Zero manual steps. Zero subscription cost. Built with n8n, JavaScript, the Finnhub API, and the Anthropic API.
 
-![Automation canvas](screenshots/canvas.png)
+[Automation canvas](canvas.png)
 
 ## The Problem
 
@@ -26,11 +26,11 @@ Every day at market close, the workflow:
 
 **Top Stories** — the AI-generated narrative, grounded in real headlines:
 
-![Top Stories digest](screenshots/top-stories.png)
+![Top Stories digest](top-stories.png)
 
 **Daily Portfolio Digest** — holdings with dollar impact, watchlist grouped by theme:
 
-![Portfolio digest](screenshots/portfolio-digest.png)
+![Portfolio digest](portfolio-digest.png)
 
 ## Architecture
 
