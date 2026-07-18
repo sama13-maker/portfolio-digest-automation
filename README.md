@@ -1,137 +1,153 @@
-# Daily Portfolio Digest — AI-Enriched Market Briefing Pipeline
+# Portfolio Digest & Live Chat Assistant
 
-A self-hosted automation that delivers two formatted Discord messages every day: a **narrative "Top Stories" briefing** explaining why the day's biggest movers actually moved, and a **full portfolio digest** covering holdings, a 25-ticker watchlist organized by theme, dollar-impact tracking, and 52-week range context.
+Two connected automations built around one goal: turning scattered market-checking into genuine financial literacy. A **scheduled daily digest** delivers an AI-enriched market briefing every day at close. A **live conversational bot** answers on-demand questions about the market and your own positions, in plain English, with real memory across a conversation.
 
-Zero manual steps. Zero subscription cost. Built with n8n, JavaScript, the Finnhub API, and the Anthropic API.
+Zero manual steps. Zero subscription cost beyond pennies of API usage. Built with n8n, JavaScript, Discord.js, the Finnhub API, and the Anthropic API.
 
-[Automation canvas](canvas.png)
+![Automation canvas](screenshots/canvas.png)
 
 ## The Problem
 
-I was checking scattered positions across apps with no consolidated view, and even when I did check, a raw percentage like "CRDO -5.9%" told me nothing about *why* — was that a real story, or just noise? I wanted one automated daily brief that showed how my holdings and a themed watchlist moved, explained the standout stories in plain language grounded in real headlines, and delivered all of it to my phone with no manual effort.
+I wanted two different things that most tools force you to choose between: a passive daily brief that tells me what happened and why, and an active tool I could actually ask follow-up questions — "how far is this from its 52-week high," "how much have I made on this position" — without opening five apps or doing math by hand.
 
-## What It Does
+## Part 1: The Daily Digest
 
-Every day at market close, the workflow:
+Every day at market close, a scheduled n8n workflow:
 
-1. Pulls live quotes for 25 tickers (stocks + crypto) from Finnhub
+1. Pulls live quotes for 30 tickers (stocks + crypto) from Finnhub, spanning personal holdings and a themed, sector-tagged watchlist
 2. Computes day-over-day change against **its own self-maintained price history** — no paid historical-data API needed
-3. Pulls 52-week high/low data and flags any ticker within 10% of either extreme
-4. Identifies the day's biggest movers (±3% or more) and fetches recent headlines for each
-5. Sends those headlines to Claude, which writes a short narrative explaining *why* each mover likely moved — grounded strictly in the provided headlines, with explicit instructions to say "no clear catalyst found" rather than fabricate a reason
-6. Formats everything into two Discord messages — a Top Stories briefing and the full numeric digest — sorted so the most notable information surfaces first
-7. Saves today's prices as a dated snapshot for tomorrow's comparison
+3. Pulls 52-week high/low data and flags any ticker within 10% of either extreme, with a visual range gauge for holdings
+4. Tracks real dollar-impact and gain/loss-since-purchase using actual cost basis
+5. Computes a volatility-ratio signal — how today's move compares to a ticker's own typical daily swing, self-activating once ~2 weeks of history accumulates
+6. Identifies the day's top 5 movers and fetches recent headlines for each
+7. Sends those headlines to Claude, which writes a grounded narrative explaining *why* each mover likely moved — explicitly instructed to say "no clear catalyst found" rather than fabricate a reason
+8. Formats everything into three purpose-built Discord messages (Top Stories, Holdings, Watching) so nothing gets truncated
+9. Saves today's prices as a dated snapshot for tomorrow's comparison
 
-## What It Looks Like
+**Daily Portfolio Digest:**
 
-**Top Stories** — the AI-generated narrative, grounded in real headlines:
+![Portfolio digest](screenshots/portfolio-digest.png)
 
-![Top Stories digest](top-stories.png)
+**Top Stories, AI-generated:**
 
-**Daily Portfolio Digest** — holdings with dollar impact, watchlist grouped by theme:
+![Top Stories digest](screenshots/top-stories.png)
 
-![Portfolio digest](portfolio-digest.png)
+## Part 2: The Live Chat Assistant
 
-## Architecture
+A second, independent system that listens for questions in Discord and answers them live, using fresh data — not the daily snapshot.
+
+**Architecture:**
 
 ```
-Schedule Trigger (daily, market close)
+Discord message ("!ask ...")
         │
-   Ticker List ──────────── 25 items, one per symbol
+Bridge script (Node.js + discord.js)
+   — listens for messages, filters for the !ask prefix,
+     forwards the question to n8n via webhook
         │
-   ┌────┴────────────────────────┐
-   │                              │
-Finnhub Quotes              Finnhub 52wk Metrics
-   │                              │
-   └──────────┬───────────────────┘
-              │
-     Consolidate (price + 52wk data, matched by symbol)
-              │
-     Compare ──────── read/write dated snapshots on disk,
-              │        compute day-over-day change
-              │
-   ┌──────────┴──────────────────┐
-   │                               │
-Flag Top 4 Movers            (price data passes through)
-   │
-Fetch News (per ticker)
-   │
-Trim to Top 2 Headlines/Ticker
-   │
-Build Claude Prompt
-   │
-Call Claude API
-   │
-Parse Response
-   │
-   └──────────┬───────────────────┘
-              │
-        Merge (sync gate — waits for both branches)
-              │
-        Format Digest ──── build both messages
-              │
-        Discord Webhook ── send Top Stories, then Portfolio Digest
+n8n Webhook Trigger
+        │
+Parse Question ─── extracts ticker (word-boundary matched
+        │           against aliases), detects personal-portfolio
+        │           intent, falls back to the last-mentioned
+        │           ticker in conversation history if none found
+        │
+   ┌────┼──────────┬──────────────┬─────────────┐
+   │    │          │              │             │
+Live   Live      Live          Check         Load
+Quote  News      Metrics       Positions     History
+   │    │          │              │             │
+   └────┴──────────┴──────────────┴─────────────┘
+                    │
+                  Merge (sync gate, 5 inputs)
+                    │
+              Build Chat Prompt ─── weaves live data,
+                    │               position data, and recent
+                    │               conversation into one prompt
+                  Call Claude
+                    │
+              Save History ─── appends this exchange
+                    │           (with symbol) to a local file
+              Send Reply
+                    │
+              Discord webhook
 ```
 
-In one sentence: **a small ETL pipeline with an AI enrichment layer** — extract from market and news APIs, transform against persisted state, synthesize with an LLM under strict grounding rules, load to a messaging channel.
+**What it can answer:**
+- Live price, day change, and recent headlines for any tracked ticker
+- 52-week high/low and Finnhub's own computed 5-day, 3-month, 6-month, and 1-year returns
+- Personal position questions — real shares, cost basis, current value, and gain/loss, read from a shared positions file
+- Genuine follow-up questions — "what about compared to last month" correctly infers the ticker from the previous exchange, using a rolling conversation history that resets after an hour of inactivity
 
-## Design Decisions Worth Explaining
+**Design decisions worth explaining:**
 
-**Self-maintained price history.** The pipeline persists a dated JSON snapshot to local disk on every run and computes day-over-day change against its own memory, with lookback tolerance for weekends and missed runs — no paid historical-data API required.
+**Word-boundary ticker matching, not substring matching.** An early version matched ticker aliases with plain substring search, which meant asking "why did GLW move so *much*" accidentally matched the ticker `MU` — because "much" contains "mu." Fixed with regex word-boundaries so short tickers only match as standalone words.
 
-**Grounded AI narrative, not generated confidence.** The Claude prompt explicitly instructs: only state a reason if it's directly supported by the provided headlines, and say so honestly if nothing relevant is found rather than guessing. This matters — an LLM asked "why did this move" without that guardrail will produce a plausible-sounding fabrication. Several tickers in the example above ended up explicitly showing "no clear catalyst found" rather than an invented story, which was the intended behavior, not a failure.
+**Conversation memory via a local history file, not a stateful LLM session.** Each exchange is saved with its question, answer, matched ticker, and timestamp. Future prompts include recent exchanges as context, and a fresh prompt is still built from scratch each time — Claude has no built-in memory; the illusion of conversation comes entirely from what we choose to feed it.
 
-**Cost-aware AI usage.** Rather than calling Claude once per ticker (expensive, noisy), the pipeline batches the day's top 4 movers into a single prompt and makes one API call per run, parsing a structured JSON response back into per-ticker explanations plus one synthesized opening paragraph.
+**Symbol inheritance for context-free follow-ups.** If a message has no ticker in it at all, `parse question` checks conversation history (within the last hour) for the most recently discussed symbol before giving up — this is what makes "what about last week" work without repeating the ticker name.
 
-**Two-message architecture to respect platform limits.** Discord caps messages at 2000 characters. Rather than truncating content, the digest is split into two purpose-built messages — a narrative-first "Top Stories" briefing and a complete numeric digest — so nothing gets cut and each message stays focused on one kind of information.
+**A dedicated bridge process, because n8n can't listen.** n8n's Discord integration is send-only — there's no native "message received" trigger. A small standalone Node.js script using `discord.js` handles the actual listening, filters for a `!ask` prefix, and forwards questions to n8n via webhook. This is a second always-running process, separate from n8n itself.
 
-**Conditional, not constant, 52-week context.** Early versions showed 52-week data on every line regardless of relevance, which was noisy and blew past message limits. The current version stays silent unless a ticker is genuinely within 10% of its high or low — and Holdings (only 3 positions) get a fuller treatment with a visual range gauge, since there's room to spare there that the 25-ticker watchlist doesn't have.
-
-**Sector-tagged watchlist with reasoned selections.** Each of the 25 tracked tickers was chosen for a specific reason — AI-infrastructure suppliers alongside the mega-caps that fund that spending, a name mid-parabolic-reversal as a volatility case study, an earnings-season bank stock, an energy name that moves on a completely different axis than the rest of the list (geopolitics, not AI sentiment) — rather than just "popular stocks." The watchlist is grouped and sorted by sector and magnitude of move, so correlated stories (e.g., three AI-infrastructure names dropping together) are visible as a pattern, not scattered across an alphabetical list.
+**Shared, file-based portfolio data, not duplicated config.** Position data (shares, cost basis) lives in one JSON file that both the digest and the chat bot can read, rather than being hardcoded separately in each — one place to update when a position changes.
 
 ## What Broke and How I Fixed It
 
-- **Safari secure-cookie block, file-access restrictions, sandboxed `fs` module** — resolved with environment flags (`N8N_SECURE_COOKIE`, `N8N_RESTRICT_FILE_ACCESS_TO`, `NODE_FUNCTION_ALLOW_BUILTIN`), now baked into a single launch script.
-- **Silent snapshot corruption.** The memory file was once overwritten with formatted message text instead of price data because the file-write step sat downstream of formatting. Diagnosed by reading item counts on the canvas — a branch showed "1 item" where price data should have shown far more. Fixed by moving persistence logic upstream of formatting entirely.
-- **Timezone bug in the date logic.** Using `toISOString()` for "today's date" silently rolled over to the next calendar day after ~8pm Eastern (UTC-based), corrupting the day-over-day comparison. Fixed by computing the date from local year/month/day components instead of UTC.
-- **Double-execution from parallel branches.** When both the price-data branch and the AI-narrative branch connected directly into the formatting node, n8n ran that node once per incoming connection — silently doubling every Discord message. Fixed with a Merge node acting purely as a synchronization gate, forcing the formatter to wait for both branches before running exactly once.
-- **JSON body corruption from unescaped headlines.** Raw news headlines occasionally contained characters that broke hand-built JSON strings sent to the Claude API. Fixed by using `JSON.stringify()` to build the request body programmatically instead of string-templating it, letting the correct escaping happen automatically.
-- **Discord's 2000-character message limit.** Solved by restructuring into two purpose-built messages rather than trimming content people actually wanted to read.
+**From the digest build:**
+- Safari secure-cookie block, file-access restrictions, sandboxed `fs` module — resolved with environment flags, baked into a launch script
+- Silent snapshot corruption from a misplaced file-write step, diagnosed by reading item counts on the canvas
+- A timezone bug where UTC-based date logic silently rolled to the next calendar day after ~8pm Eastern, corrupting comparisons
+- Double-execution from two branches feeding one node directly — fixed with a Merge node as a pure synchronization gate
+- Discord's 2000-character message limit — solved with a three-message split rather than truncating content
+
+**From the chat bot build:**
+- **The substring-matching ticker bug** described above (GLW question answered about MU instead)
+- **Zombie background processes.** Multiple terminal-tab freezes during development left old `node bridge.js` processes running invisibly in the background, competing for the same Discord bot token and silently intercepting messages meant for the active session. Diagnosed with `ps aux | grep` and resolved with `kill`.
+- **Test vs. Production webhook confusion.** n8n's test webhook URL only fires once per manual arm-click; a `sed` replacement meant to switch to the Production URL silently failed to match, so the bridge kept sending to the test endpoint for longer than expected. Fixed by rewriting the file directly rather than trusting an in-place text substitution.
+- **Reliability gaps closed with persistence tooling.** Both n8n and the bridge script now run under macOS LaunchAgents (`RunAtLoad`, and `KeepAlive` for the bridge specifically, so it self-restarts if it ever crashes) rather than depending on a terminal window staying open. n8n additionally runs wrapped in `caffeinate -i` to prevent the Mac from idle-sleeping mid-session, paired with a system Energy setting to prevent sleep while plugged in.
 
 ## Stack
 
 | Piece | Choice | Why |
 |---|---|---|
 | Orchestration | n8n (self-hosted, local) | Free, visual debugging, per-item execution model |
+| Live listening | Node.js + discord.js (bridge script) | n8n has no native Discord message trigger |
 | Market data | Finnhub free tier | Quotes, 52-week metrics, company news — one key, one provider |
-| AI synthesis | Anthropic API (Claude) | Structured JSON output, strong instruction-following for grounding rules |
-| Persistence | Dated JSON files on disk | Free historical data via self-maintained state |
-| Delivery | Discord webhook | No auth, no OAuth, instant mobile push |
-| Logic | JavaScript (n8n Code nodes) | Comparison math, formatting, API orchestration |
+| AI synthesis | Anthropic API (Claude) | Structured output, strong instruction-following for grounding rules |
+| Persistence | Dated JSON snapshots + a conversation-history file + a shared positions file | Free historical data and memory via self-maintained state, no database needed |
+| Delivery | Discord webhooks | No auth, no OAuth, instant mobile push |
+| Reliability | macOS LaunchAgents + `caffeinate` | Both systems survive sleep, terminal closures, and crashes without manual intervention |
 
 ## Running It
 
-1. Import `workflow.json` into n8n
-2. Get a free API key at [finnhub.io](https://finnhub.io) and an API key at [console.anthropic.com](https://console.anthropic.com), add both to the relevant HTTP Request nodes
-3. Create a Discord webhook (Server Settings → Integrations → Webhooks) and paste the URL into the Discord node
-4. Create a snapshot directory and launch n8n with:
+**Daily digest:**
+1. Import `digest-workflow.json` into n8n
+2. Add Finnhub and Anthropic API keys to the relevant nodes
+3. Create a Discord webhook and paste the URL into the Discord node
+4. Edit the ticker array and the shared positions file to match your own watchlist and holdings
+5. Launch n8n with the required environment flags (see `start-n8n.sh`), publish the workflow
 
-```bash
-N8N_SECURE_COOKIE=false \
-N8N_RESTRICT_FILE_ACCESS_TO=/path/to/snapshot/dir \
-NODE_FUNCTION_ALLOW_BUILTIN=fs \
-npx n8n
-```
+**Live chat assistant:**
+1. Register a Discord Bot Application, enable the Message Content privileged intent, and invite it to your server
+2. Import `chat-workflow.json` into n8n, copy its webhook's Production URL
+3. Clone the bridge script folder, `npm install discord.js`, add your bot token and the webhook URL to `bridge.js`
+4. Run `node bridge.js`, publish the n8n chat workflow
+5. Ask anything in Discord with a `!ask` prefix
 
-5. Edit the ticker array and `SHARES`/`HOLDINGS` objects in the relevant Code nodes to match your own positions and watchlist
-6. Publish the workflow and set it Active
+## Known Limitations
+
+- No true historical daily-candle data — only Finnhub's pre-computed return summaries (5-day/13-week/26-week/52-week), since real historical candles are a paid Finnhub tier
+- Chat is scoped to tracked tickers only; asking about an untracked stock won't resolve to a symbol
+- No multi-ticker comparison logic — "compare NVDA and AMD" only resolves the first match
+- Crypto news coverage is thin, since Finnhub's company-news endpoint isn't built for crypto assets
+- Conversation memory is single-user by design; the history file has no per-user separation
 
 ## Roadmap
 
-- **Concentration alerts** — flag when a single position drifts past a set share of tracked value
-- **Earnings calendar warnings** — surface upcoming report dates so nothing blindsides me
-- **Risk monitoring layer** — rolling volatility flags, drawdown-from-high tracking, correlation risk across the AI-infrastructure cluster
-- **Always-on hosting** — currently runs while my Mac is awake or asleep-with-Power-Nap; migration to a small cloud instance or Raspberry Pi would remove that dependency entirely
+- Whole-market access beyond the tracked ticker list
+- Thematic/sector questions ("how's the AI chip industry doing") reasoning across multiple tickers at once
+- Concentration risk alerts and earnings calendar warnings
+- Migrating off local hardware entirely (a small cloud instance or Raspberry Pi) to remove any dependency on the Mac being awake
 
 ---
 
