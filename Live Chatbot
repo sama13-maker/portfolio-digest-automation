@@ -1,0 +1,476 @@
+{
+  "name": "Discord Portfolio Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 16,
+              "triggerAtMinute": 5
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -64,
+        -16
+      ],
+      "id": "bf1f2b3b-693a-48ec-8e1b-844e614122da",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discordapp.com/api/webhooks/WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1392,
+        0
+      ],
+      "id": "673860a6-ed14-4b54-95a4-b79dcf4809d5",
+      "name": "DISCORD"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $('compare').all().map(i => i.json);\n\nconst HOLDINGS = [\"SPY\", \"BINANCE:BTCUSDT\", \"META\"];\n\nconst SHARES = {\n  \"SPY\": 0.268072,\n  \"BINANCE:BTCUSDT\": 0.002054,\n  \"META\": 0.19012,\n};\n\nconst displayName = (s) => {\n  if (s === \"BINANCE:BTCUSDT\") return \"BTC\";\n  if (s === \"BINANCE:ETHUSDT\") return \"ETH\";\n  if (s === \"BINANCE:XRPUSDT\") return \"XRP\";\n  return s;\n};\n\nconst COMPANY_NAMES = {\n  \"NVDA\": \"Nvidia\", \"SPY\": \"S&P 500 ETF\", \"BINANCE:BTCUSDT\": \"Bitcoin\",\n  \"PLTR\": \"Palantir\", \"HOOD\": \"Robinhood\", \"TSLA\": \"Tesla\", \"ASTS\": \"AST SpaceMobile\",\n  \"MU\": \"Micron\", \"VRT\": \"Vertiv\", \"CRDO\": \"Credo Technology\", \"CCJ\": \"Cameco\",\n  \"AVGO\": \"Broadcom\", \"AMD\": \"AMD\", \"ARM\": \"Arm Holdings\",\n  \"QCOM\": \"Qualcomm\",\n  \"COIN\": \"Coinbase\", \"BINANCE:ETHUSDT\": \"Ethereum\", \"BINANCE:XRPUSDT\": \"XRP\",\n  \"AMZN\": \"Amazon\", \"TTD\": \"The Trade Desk\",\n  \"META\": \"Meta\", \"GOOGL\": \"Alphabet\", \"GLW\": \"Corning\", \"JPM\": \"JPMorgan Chase\", \"XOM\": \"ExxonMobil\",\n};\n\nconst SECTORS = {\n  \"NVDA\": \"AI Infrastructure\", \"MU\": \"AI Infrastructure\", \"VRT\": \"AI Infrastructure\",\n  \"CRDO\": \"AI Infrastructure\", \"CCJ\": \"AI Infrastructure\", \"AVGO\": \"AI Infrastructure\",\n  \"AMD\": \"AI Infrastructure\", \"ARM\": \"AI Infrastructure\", \"QCOM\": \"AI Infrastructure\",\n  \"GLW\": \"AI Infrastructure\",\n  \"PLTR\": \"Retail Momentum\", \"HOOD\": \"Retail Momentum\", \"TSLA\": \"Retail Momentum\", \"ASTS\": \"Retail Momentum\",\n  \"COIN\": \"Crypto\", \"BINANCE:ETHUSDT\": \"Crypto\", \"BINANCE:XRPUSDT\": \"Crypto\",\n  \"AMZN\": \"Mega-cap\", \"META\": \"Mega-cap\", \"GOOGL\": \"Mega-cap\",\n  \"TTD\": \"Ad Tech\",\n  \"JPM\": \"Financials\",\n  \"XOM\": \"Energy\",\n};\n\nconst SECTOR_ORDER = [\"AI Infrastructure\", \"Retail Momentum\", \"Mega-cap\", \"Financials\", \"Energy\", \"Crypto\", \"Ad Tech\"];\n\nconst fmt = (n) => n === null || n === undefined\n  ? \"n/a\"\n  : `${n >= 0 ? \"+\" : \"\"}${n.toFixed(2)}%`;\n\nconst fmtDollar = (n) =>\n  `${n >= 0 ? \"+\" : \"-\"}$${Math.abs(n).toFixed(2)}`;\n\n// Only shows anything when within 10% of the 52-week high or low — silent otherwise\nconst week52Compact = (r) => {\n  if (r.week52High == null || r.week52Low == null) return \"\";\n  const range = r.week52High - r.week52Low;\n  if (range <= 0) return \"\";\n\n  const pctFromHigh = ((r.week52High - r.price) / range) * 100;\n  if (pctFromHigh <= 10) {\n    return `  🔺 near 52wk high ($${r.week52High.toLocaleString()})`;\n  }\n\n  const pctFromLow = ((r.price - r.week52Low) / range) * 100;\n  if (pctFromLow <= 10) {\n    return `  🔻 near 52wk low ($${r.week52Low.toLocaleString()})`;\n  }\n\n  return \"\";\n};\n\n// Full version with visual gauge — used only in Holdings (short list, room to spare)\nconst week52Full = (r) => {\n  if (r.week52High == null || r.week52Low == null) return \"\";\n  const range = r.week52High - r.week52Low;\n  if (range <= 0) return \"\";\n\n  let pct = (r.price - r.week52Low) / range;\n  pct = Math.max(0, Math.min(1, pct));\n\n  const barLength = 10;\n  const pos = Math.min(barLength - 1, Math.round(pct * (barLength - 1)));\n  let bar = \"\";\n  for (let i = 0; i < barLength; i++) bar += (i === pos) ? \"🔘\" : \"─\";\n\n  const pctFromHigh = ((r.week52High - r.price) / range) * 100;\n  const pctFromLow = ((r.price - r.week52Low) / range) * 100;\n  const flag = pctFromHigh <= 10 ? \" 🔺 near high\" : (pctFromLow <= 10 ? \" 🔻 near low\" : \"\");\n\n  return `\\n   52wk: $${r.week52Low.toLocaleString()} ${bar} $${r.week52High.toLocaleString()}${flag}`;\n};\n\n// --- Narrative from the news/Claude branch ---\nlet narrative = null;\ntry {\n  const parsed = $('parse claude response').all();\n  narrative = parsed.length ? parsed[0].json : null;\n} catch (e) {\n  narrative = null;\n}\n\nconst name = (symbol) => COMPANY_NAMES[symbol] || symbol;\n\nconst watchLine = (r) => {\n  return `**${displayName(r.symbol)}** (${name(r.symbol)})  $${r.price.toLocaleString()}  |  day: ${fmt(r.dayChangePct)}${week52Compact(r)}`;\n};\n\nconst holdingLine = (r) => {\n  const shares = SHARES[r.symbol];\n  const marketValue = shares ? shares * r.price : null;\n\n  let dollarPart = \"\";\n  if (shares && r.dayChangePct !== null && r.dayChangePct !== undefined) {\n    const prevPrice = r.price / (1 + r.dayChangePct / 100);\n    const dollarChange = (r.price - prevPrice) * shares;\n    dollarPart = `  (${fmtDollar(dollarChange)} today)`;\n  }\n\n  const valuePart = marketValue ? `  —  $${marketValue.toFixed(2)} total` : \"\";\n\n  return `**${displayName(r.symbol)}** (${name(r.symbol)})  $${r.price.toLocaleString()}  |  day: ${fmt(r.dayChangePct)}${dollarPart}${valuePart}${week52Full(r)}`;\n};\n\nconst holdings = rows.filter(r => HOLDINGS.includes(r.symbol));\nconst watching = rows.filter(r => !HOLDINGS.includes(r.symbol));\n\nconst grouped = {};\nfor (const r of watching) {\n  const sector = SECTORS[r.symbol] || \"Other\";\n  if (!grouped[sector]) grouped[sector] = [];\n  grouped[sector].push(r);\n}\nfor (const sector in grouped) {\n  grouped[sector].sort((a, b) =>\n    Math.abs(b.dayChangePct ?? -Infinity) - Math.abs(a.dayChangePct ?? -Infinity)\n  );\n}\n\nconst sectorBlocks = SECTOR_ORDER\n  .filter(sector => grouped[sector])\n  .map(sector => `**${sector}**\\n${grouped[sector].map(watchLine).join(\"\\n\")}`)\n  .join(\"\\n\\n\");\n\nconst today = new Date().toLocaleDateString(\"en-US\", { month: \"long\", day: \"numeric\" });\n\n// --- MESSAGE 1: Top Stories ---\nlet message1;\nif (narrative && narrative.explanations) {\n  const rowsBySymbol = {};\n  for (const r of rows) rowsBySymbol[r.symbol] = r;\n\n  const storyLines = Object.entries(narrative.explanations).map(([symbol, explanation]) => {\n    const r = rowsBySymbol[symbol];\n    const priceLine = r\n      ? `**${displayName(symbol)}** (${name(symbol)})  $${r.price.toLocaleString()}  |  day: ${fmt(r.dayChangePct)}`\n      : `**${displayName(symbol)}** (${name(symbol)})`;\n    return `${priceLine}\\n   💬 ${explanation}`;\n  }).join(\"\\n\\n\");\n\n  message1 =\n    `📰 **Top Stories — ${today}**\\n\\n` +\n    `${narrative.summary}\\n\\n` +\n    storyLines;\n} else {\n  message1 = `📰 **Top Stories — ${today}**\\n\\nNo notable moves crossed the news threshold today.`;\n}\n\n// --- MESSAGE 2: Portfolio Digest (Holdings + full Watching) ---\nconst message2 =\n  `📊 **Daily Portfolio Digest — ${today}**\\n\\n` +\n  `💼 **Holdings**\\n${holdings.map(holdingLine).join(\"\\n\")}\\n\\n` +\n  `👀 **Watching**\\n\\n${sectorBlocks}`;\n\nreturn [\n  { json: { content: message1 } },\n  { json: { content: message2 } },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -64
+      ],
+      "id": "799c86cc-c8ee-4dea-8b53-2f415ada8aae",
+      "name": "output"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fs = require('fs');\nconst DIR = '/Users/samallen/watchlist';\n\nconst dateStr = (offset) => {\n  const d = new Date();\n  d.setDate(d.getDate() - offset);\n  const year = d.getFullYear();\n  const month = String(d.getMonth() + 1).padStart(2, '0');\n  const day = String(d.getDate()).padStart(2, '0');\n  return `${year}-${month}-${day}`;\n};\n\nconst loadSnapshot = (offset) => {\n  try {\n    const raw = fs.readFileSync(`${DIR}/snapshot-${dateStr(offset)}.json`, 'utf8');\n    const map = {};\n    for (const row of JSON.parse(raw)) map[row.symbol] = row.price;\n    return map;\n  } catch (e) {\n    return null;\n  }\n};\n\nlet yesterday = null;\nfor (let o = 1; o <= 3 && !yesterday; o++) yesterday = loadSnapshot(o);\nlet lastWeek = loadSnapshot(7);\nfor (let o = 6; o <= 10 && !lastWeek; o++) lastWeek = loadSnapshot(o);\n\nconst pct = (now, prev) =>\n  (prev !== undefined && prev !== null) ? Number((((now - prev) / prev) * 100).toFixed(2)) : null;\n\nconst out = items.map(item => {\n  const prevPrice = yesterday ? yesterday[item.json.symbol] : undefined;\n  const dayPct = prevPrice !== undefined\n    ? pct(item.json.price, prevPrice)\n    : item.json.dayChangePct;\n\n  return {\n    json: {\n      symbol: item.json.symbol,\n      price: item.json.price,\n      dayChangePct: dayPct,\n      weeklyChangePct: lastWeek ? pct(item.json.price, lastWeek[item.json.symbol]) : null,\n      week52High: item.json.week52High ?? null,\n      week52Low: item.json.week52Low ?? null,\n    }\n  };\n});\n\nconst todayRows = items.map(i => ({ symbol: i.json.symbol, price: i.json.price }));\nfs.writeFileSync(`${DIR}/snapshot-${dateStr(0)}.json`, JSON.stringify(todayRows));\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -16
+      ],
+      "id": "5d30c5c2-200f-45e1-a7f6-24765ad08933",
+      "name": "compare"
+    },
+    {
+      "parameters": {
+        "url": "=https://finnhub.io/api/v1/stock/metric?symbol={{ $json.symbol }}&metric=all&token=YOUR_FINNHUB_API_KEY",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        368,
+        -144
+      ],
+      "id": "c9c75779-8a2f-4524-8b9c-e58320d67a46",
+      "name": "52 week high/low"
+    },
+    {
+      "parameters": {
+        "jsCode": "const week52Data = {};\nfor (const entry of $('trim 52wk data').all()) {\n  week52Data[entry.json.symbol] = { high: entry.json.week52High, low: entry.json.week52Low };\n}\n\nreturn items.map((item) => {\n  const originalIndex = item.pairedItem.item;\n  const symbol = $('tickers').all()[originalIndex].json.symbol;\n  const week52 = week52Data[symbol] || { high: null, low: null };\n  return {\n    json: {\n      symbol: symbol,\n      price: item.json.c,\n      dayChangePct: item.json.dp,\n      prevClose: item.json.pc,\n      week52High: week52.high,\n      week52Low: week52.low,\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        16
+      ],
+      "id": "c651817e-7ee4-44ff-a69d-0acdbfa25b38",
+      "name": "retrieval and consolodation code"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map((item) => {\n  const originalIndex = item.pairedItem.item;\n  const symbol = $('tickers').all()[originalIndex].json.symbol;\n  const metric = item.json.metric || {};\n  return {\n    json: {\n      symbol: symbol,\n      week52High: metric[\"52WeekHigh\"] ?? null,\n      week52Low: metric[\"52WeekLow\"] ?? null,\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -144
+      ],
+      "id": "cc60ab39-1976-4293-b499-e874f3338f98",
+      "name": "trim 52wk data"
+    },
+    {
+      "parameters": {
+        "url": "https://finnhub.io/api/v1/quote",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "YOUR_FINNHUB_API_KEY"
+            },
+            {
+              "name": "=symbol",
+              "value": "={{ $json.symbol }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        96
+      ],
+      "id": "2ac4fc7e-f433-47fd-8dd4-83b977e7f5dd",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const tickers = [\n  \"NVDA\", \"SPY\", \"BINANCE:BTCUSDT\",\n  \"PLTR\", \"HOOD\", \"TSLA\", \"ASTS\",\n  \"MU\", \"VRT\", \"CRDO\", \"CCJ\",\n  \"AVGO\", \"AMD\", \"ARM\",\n  \"QCOM\",\n  \"COIN\", \"BINANCE:ETHUSDT\", \"BINANCE:XRPUSDT\",\n  \"AMZN\", \"TTD\",\n  \"META\", \"GOOGL\", \"GLW\", \"JPM\", \"XOM\"\n];\n\nreturn tickers.map(t => ({ json: { symbol: t } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        0
+      ],
+      "id": "0fb40d01-5cb9-4c3c-b6d5-00001c9f9267",
+      "name": "tickers"
+    },
+    {
+      "parameters": {
+        "url": "https://finnhub.io/api/v1/company-news",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.symbol }}"
+            },
+            {
+              "name": "from",
+              "value": "={{ $json.newsFrom }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $json.newsTo }}"
+            },
+            {
+              "name": "token",
+              "value": "YOUR_FINNHUB_API_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        752,
+        496
+      ],
+      "id": "f31b0975-b749-42ac-8a63-3495faa7a13d",
+      "name": "fetch news"
+    },
+    {
+      "parameters": {
+        "jsCode": "const grouped = {};\n\nitems.forEach((item) => {\n  const symbol = item.json.related;\n  if (!symbol) return;  // skip any article missing a ticker tag\n  if (!grouped[symbol]) grouped[symbol] = [];\n  grouped[symbol].push(item.json);\n});\n\nconst output = [];\nfor (const symbol in grouped) {\n  const sorted = grouped[symbol].sort((a, b) => b.datetime - a.datetime);\n  const top = sorted.slice(0, 2).map(a => ({ headline: a.headline, summary: a.summary }));\n  output.push({ json: { symbol, articles: top } });\n}\n\nreturn output;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        496
+      ],
+      "id": "30ef987e-075a-4328-91fe-3681c87c3b8b",
+      "name": "trim news"
+    },
+    {
+      "parameters": {
+        "jsCode": "const isCrypto = (symbol) => symbol.startsWith(\"BINANCE:\");\n\nconst eligible = items.filter(item => {\n  const moveIsBig = Math.abs(item.json.dayChangePct ?? 0) >= 3;\n  return moveIsBig && !isCrypto(item.json.symbol);\n});\n\n// Sort by absolute size of move, keep only the top 4\neligible.sort((a, b) =>\n  Math.abs(b.json.dayChangePct ?? 0) - Math.abs(a.json.dayChangePct ?? 0)\n);\n\nconst top4 = eligible.slice(0, 4);\n\nconst today = new Date();\nconst from = new Date(today);\nfrom.setDate(from.getDate() - 2);\nconst fmt = (d) => d.toISOString().slice(0, 10);\n\nreturn top4.map(item => ({\n  json: {\n    ...item.json,\n    newsFrom: fmt(from),\n    newsTo: fmt(today),\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        496
+      ],
+      "id": "81bcdc9d-97cb-40e3-bb82-55a53adc1f87",
+      "name": "flagged movers"
+    },
+    {
+      "parameters": {
+        "jsCode": "const movers = items.map(i => i.json);\n\nconst moverList = movers.map(m => {\n  const headlines = m.articles.map(a => `- ${a.headline}`).join('\\n');\n  return `${m.symbol}:\\n${headlines}`;\n}).join('\\n\\n');\n\nconst prompt = `You are writing a short, factual market recap for a personal daily portfolio digest. Below are today's biggest movers (±3% or more) and recent headlines about each.\n\nFor each ticker, write 2-3 sentences explaining the most likely reason for today's move, based ONLY on the headlines given. Include relevant specifics from the headlines (numbers, names, events) rather than staying vague. If the headlines don't clearly explain the move, say so honestly rather than guessing (e.g. \"No clear catalyst found in today's headlines\").\n\nThen write one short opening paragraph (4-5 sentences) summarizing the day's biggest story across all movers, mentioning the relevant tickers by symbol.\n\nMovers and headlines:\n${moverList}\n\nRespond ONLY in this exact JSON format, no other text:\n{\n  \"summary\": \"opening paragraph here\",\n  \"explanations\": {\n    \"TICKER1\": \"one sentence here\",\n    \"TICKER2\": \"one sentence here\"\n  }\n}`;\n\nreturn [{ json: { prompt } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        496
+      ],
+      "id": "1d74b4fe-7fd2-471e-8b92-11b9f649a3be",
+      "name": "build claude prompt"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "YOUR_ANTHROPIC_API_KEY"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"claude-sonnet-4-6\", max_tokens: 1000, messages: [{ role: \"user\", content: $json.prompt }] }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1104,
+        496
+      ],
+      "id": "7e10c475-8da0-463d-a2a8-893351034b92",
+      "name": "call claude"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = items[0].json.content[0].text;\n\n// Strip markdown code fences if present\nconst cleaned = raw.replace(/```json\\s*/g, '').replace(/```\\s*/g, '').trim();\n\nconst parsed = JSON.parse(cleaned);\n\nreturn [{\n  json: {\n    summary: parsed.summary,\n    explanations: parsed.explanations,\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        496
+      ],
+      "id": "966a737d-7a74-4d7e-aab7-15d52b9ff35b",
+      "name": "parse claude response"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1104,
+        96
+      ],
+      "id": "ebff0068-884c-4a93-acec-b42b915c82f3",
+      "name": "Merge"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "tickers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DISCORD": {
+      "main": [
+        []
+      ]
+    },
+    "output": {
+      "main": [
+        [
+          {
+            "node": "DISCORD",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "compare": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "flagged movers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "52 week high/low": {
+      "main": [
+        [
+          {
+            "node": "trim 52wk data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "retrieval and consolodation code": {
+      "main": [
+        [
+          {
+            "node": "compare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "trim 52wk data": {
+      "main": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "retrieval and consolodation code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tickers": {
+      "main": [
+        [
+          {
+            "node": "52 week high/low",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetch news": {
+      "main": [
+        [
+          {
+            "node": "trim news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "flagged movers": {
+      "main": [
+        [
+          {
+            "node": "fetch news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "trim news": {
+      "main": [
+        [
+          {
+            "node": "build claude prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "build claude prompt": {
+      "main": [
+        [
+          {
+            "node": "call claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "call claude": {
+      "main": [
+        [
+          {
+            "node": "parse claude response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parse claude response": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "1ec41b9b-5e65-4f8a-809f-1746c2aa57b6",
+  "meta": {
+    "instanceId": "1915a4333a5dde4c068b780f5999d483b6e07a33fbfc89196e3a15add8cde645"
+  },
+  "id": "YeonYfhKxhRuWbNq",
+  "tags": []
+}
