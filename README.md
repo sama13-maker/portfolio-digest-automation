@@ -151,4 +151,4 @@ Quote  News      Metrics       Positions     History
 
 ---
 
-*Built July 2026. Not investment advice — this tool reports what happened and, where the evidence supports it, why. The thinking is still my job.*
+*Built July 2026. Not investment advice — this tool reports what happened, where the evidence supports it and why. The thinking is still my job.*
